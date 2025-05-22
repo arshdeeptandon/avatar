@@ -1,210 +1,75 @@
-# Talking Face Avatar - GPU Optimized
+# Talking Face Avatar
 
-This repository contains an optimized version of the Talking Face Avatar project, specifically designed for GPU acceleration and AWS SageMaker deployment. The code has been optimized for better performance and memory management.
+A deep learning-based system for generating talking face videos from audio and source images.
 
 ## Features
 
-- GPU-accelerated face animation generation
-- Optimized memory management
-- Mixed precision training support
-- Dynamic batch processing
-- AWS SageMaker deployment ready
-- Enhanced face detection and processing
+- Text-to-speech conversion
+- Lip sync generation
+- Real-time video streaming
+- WebSocket-based communication
+- FastAPI server for API endpoints
 
-## Prerequisites
+## Project Structure
 
-- Python 3.8+
-- CUDA 11.1+ (for GPU support)
-- FFmpeg
-- NVIDIA GPU with at least 8GB VRAM (recommended)
-
-## Installation
-
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/yourusername/Talking_Face_Avatar_GPU.git
-cd Talking_Face_Avatar_GPU
+```
+Talking_Face_Avatar/
+├── api_lip_sync.py          # FastAPI server implementation
+├── inference.py             # Main inference script
+├── download_video.py        # Utility for downloading generated videos
+├── src/                     # Source code
+│   ├── facerender/         # Face rendering modules
+│   ├── utils/              # Utility functions
+│   └── ...
+├── examples/                # Example files
+│   ├── driven_audio/       # Sample audio files
+│   └── source_image/       # Sample source images
+└── checkpoints/            # Model checkpoints (not included in repo)
 ```
 
-### 2. Create Conda Environment
+## Setup
 
+1. Clone the repository:
 ```bash
-conda create -n sadtalker_gpu python=3.8
-conda activate sadtalker_gpu
+git clone <repository-url>
+cd Talking_Face_Avatar
 ```
 
-### 3. Install Dependencies
-
+2. Install dependencies:
 ```bash
-# Install PyTorch with CUDA support
-conda install pytorch==1.9.1 torchvision==0.10.1 torchaudio==0.9.1 cudatoolkit=11.1 -c pytorch -c conda-forge
-
-# Install FFmpeg
-conda install ffmpeg
-
-# Install other dependencies
 pip install -r requirements.txt
 ```
 
-### 4. Download Model Weights
-
-Download the required model weights from the original repository and place them in the `checkpoints` directory:
-
+3. Download model checkpoints (not included in repo):
 ```bash
-mkdir -p checkpoints
-# Download the following files to checkpoints/:
-# - epoch_20.pth
-# - auido2pose_00140-model.pth
-# - auido2exp_00300-model.pth
-# - facevid2vid_00189-model.pth.tar
-# - mapping_00229-model.pth.tar
-# - shape_predictor_68_face_landmarks.dat
+./download_checkpoints.sh
 ```
 
 ## Usage
 
-### Basic Usage
-
+1. Start the FastAPI server:
 ```bash
-python inference.py \
-    --driven_audio examples/driven_audio/RD_Radio34_002.wav \
-    --source_image examples/source_image/happy1.png \
-    --enhancer gfpgan \
-    --preprocess full
+uvicorn api_lip_sync:app --host 0.0.0.0 --port 8002 --reload
 ```
 
-### Optimized Version
-
-For better performance, use the optimized version:
-
+2. Run inference directly:
 ```bash
-python inference_optimized.py \
-    --driven_audio examples/driven_audio/RD_Radio34_002.wav \
-    --source_image examples/source_image/happy1.png \
-    --enhancer gfpgan \
-    --preprocess full \
-    --batch_size 8
+python inference.py --driven_audio examples/driven_audio/RD_Radio34_002.wav --source_image examples/source_image/happy1.png
 ```
 
-### Command Line Arguments
+## API Endpoints
 
-- `--driven_audio`: Path to the input audio file
-- `--source_image`: Path to the source face image
-- `--enhancer`: Face enhancement method (gfpgan, gpen, or none)
-- `--preprocess`: Preprocessing method (crop, resize, or full)
-- `--batch_size`: Batch size for processing (default: 8 for GPUs >10GB, 4 for smaller GPUs)
-- `--expression_scale`: Expression scale factor (default: 1.0)
-- `--pose_style`: Pose style (default: 0)
-- `--result_dir`: Output directory (default: ./results)
-
-## AWS SageMaker Deployment
-
-### 1. Create a SageMaker Notebook Instance
-
-1. Go to AWS SageMaker Console
-2. Create a new notebook instance with:
-   - Instance type: ml.g4dn.xlarge (or larger for better performance)
-   - Platform: conda_python3
-   - Volume size: 50GB (minimum)
-
-### 2. Clone and Setup
-
-In your SageMaker notebook:
-
-```python
-# Clone the repository
-!git clone https://github.com/yourusername/Talking_Face_Avatar_GPU.git
-%cd Talking_Face_Avatar_GPU
-
-# Create and activate conda environment
-!conda create -n sadtalker_gpu python=3.8 -y
-!conda activate sadtalker_gpu
-
-# Install dependencies
-!conda install pytorch==1.9.1 torchvision==0.10.1 torchaudio==0.9.1 cudatoolkit=11.1 -c pytorch -c conda-forge -y
-!conda install ffmpeg -y
-!pip install -r requirements.txt
-```
-
-### 3. Download Model Weights
-
-Create a notebook cell to download the model weights:
-
-```python
-import os
-import gdown
-
-# Create checkpoints directory
-os.makedirs('checkpoints', exist_ok=True)
-
-# Download model weights
-# Add your download links here
-```
-
-### 4. Run Inference
-
-Create a notebook cell for inference:
-
-```python
-import subprocess
-
-def run_inference(audio_path, image_path, output_dir='results'):
-    cmd = f"""
-    python inference_optimized.py \
-        --driven_audio {audio_path} \
-        --source_image {image_path} \
-        --enhancer gfpgan \
-        --preprocess full \
-        --batch_size 8 \
-        --result_dir {output_dir}
-    """
-    subprocess.run(cmd, shell=True, check=True)
-```
-
-## Performance Optimization Tips
-
-1. **GPU Memory Management**:
-   - Use `--batch_size` appropriate for your GPU memory
-   - Monitor GPU memory usage with `nvidia-smi`
-   - Consider using gradient checkpointing for large models
-
-2. **Processing Speed**:
-   - Use the optimized version (`inference_optimized.py`)
-   - Enable mixed precision training
-   - Use appropriate batch size for your GPU
-
-3. **Quality vs Speed Trade-off**:
-   - Use `--preprocess full` for best quality
-   - Use `--preprocess crop` for faster processing
-   - Adjust `--expression_scale` for different expression intensities
-
-## Troubleshooting
-
-1. **CUDA Out of Memory**:
-   - Reduce batch size
-   - Use gradient checkpointing
-   - Clear GPU cache between runs
-
-2. **Face Detection Issues**:
-   - Ensure source image has clear face
-   - Try different preprocessing methods
-   - Check image resolution
-
-3. **Installation Issues**:
-   - Ensure CUDA version matches PyTorch
-   - Use exact versions specified in requirements
-   - Check GPU compatibility
+- WebSocket: `ws://localhost:8002/ws/{client_id}`
+- Generate: `POST /generate`
+- Status: `GET /status/{client_id}`
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+[Add your license information here]
 
 ## Acknowledgments
 
-- Original Talking Face Avatar project
-- GFPGAN for face enhancement
-- All other open-source projects used in this repository
+[Add any acknowledgments here]
 
 <div align="center">
 

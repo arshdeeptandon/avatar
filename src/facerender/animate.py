@@ -3,15 +3,18 @@ import cv2
 import yaml
 import numpy as np
 import warnings
+import logging
 from skimage import img_as_ubyte
 
-warnings.filterwarnings('ignore')
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
+warnings.filterwarnings('ignore')
 
 import imageio
 import torch
 import torchvision
-
 
 from src.facerender.modules.keypoint_detector import HEEstimator, KPDetector
 from src.facerender.modules.mapping import MappingNet
@@ -23,12 +26,11 @@ from src.utils.face_enhancer import enhancer as face_enhancer
 from src.utils.paste_pic import paste_pic
 from src.utils.videoio import save_video_with_watermark
 
-
 class AnimateFromCoeff():
-
     def __init__(self, free_view_checkpoint, mapping_checkpoint,
                    config_path, device):
-
+        logger.info("Initializing AnimateFromCoeff")
+        
         with open(config_path) as f:
             config = yaml.safe_load(f)
 
@@ -39,7 +41,6 @@ class AnimateFromCoeff():
         he_estimator = HEEstimator(**config['model_params']['he_estimator_params'],
                                **config['model_params']['common_params'])
         mapping = MappingNet(**config['model_params']['mapping_params'])
-
 
         generator.to(device)
         kp_extractor.to(device)
@@ -59,23 +60,23 @@ class AnimateFromCoeff():
         else:
             raise AttributeError("Checkpoint should be specified for video head pose estimator.")
 
-        if  mapping_checkpoint is not None:
+        if mapping_checkpoint is not None:
             self.load_cpk_mapping(mapping_checkpoint, mapping=mapping)
         else:
-            raise AttributeError("Checkpoint should be specified for video head pose estimator.") 
+            raise AttributeError("Checkpoint should be specified for mapping.")
 
-        self.kp_extractor = kp_extractor
         self.generator = generator
+        self.kp_extractor = kp_extractor
         self.he_estimator = he_estimator
         self.mapping = mapping
+        self.device = device
 
+        # Set models to eval mode
         self.kp_extractor.eval()
         self.generator.eval()
         self.he_estimator.eval()
         self.mapping.eval()
-         
-        self.device = device
-    
+
     def load_cpk_facevid2vid(self, checkpoint_path, generator=None, discriminator=None, 
                         kp_detector=None, he_estimator=None, optimizer_generator=None, 
                         optimizer_discriminator=None, optimizer_kp_detector=None, 
@@ -89,26 +90,26 @@ class AnimateFromCoeff():
             he_estimator.load_state_dict(checkpoint['he_estimator'])
         if discriminator is not None:
             try:
-               discriminator.load_state_dict(checkpoint['discriminator'])
+                discriminator.load_state_dict(checkpoint['discriminator'])
             except:
-               print ('No discriminator in the state-dict. Dicriminator will be randomly initialized')
+                print('No discriminator in the state-dict. Discriminator will be randomly initialized')
         if optimizer_generator is not None:
             optimizer_generator.load_state_dict(checkpoint['optimizer_generator'])
         if optimizer_discriminator is not None:
             try:
                 optimizer_discriminator.load_state_dict(checkpoint['optimizer_discriminator'])
             except RuntimeError as e:
-                print ('No discriminator optimizer in the state-dict. Optimizer will be not initialized')
+                print('No discriminator optimizer in the state-dict. Optimizer will be not initialized')
         if optimizer_kp_detector is not None:
             optimizer_kp_detector.load_state_dict(checkpoint['optimizer_kp_detector'])
         if optimizer_he_estimator is not None:
             optimizer_he_estimator.load_state_dict(checkpoint['optimizer_he_estimator'])
 
         return checkpoint['epoch']
-    
+
     def load_cpk_mapping(self, checkpoint_path, mapping=None, discriminator=None,
                  optimizer_mapping=None, optimizer_discriminator=None, device='cpu'):
-        checkpoint = torch.load(checkpoint_path,  map_location=torch.device(device))
+        checkpoint = torch.load(checkpoint_path, map_location=torch.device(device))
         if mapping is not None:
             mapping.load_state_dict(checkpoint['mapping'])
         if discriminator is not None:
@@ -120,8 +121,8 @@ class AnimateFromCoeff():
 
         return checkpoint['epoch']
 
-    def generate(self, x, video_save_dir, pic_path, crop_info, enhancer=None, background_enhancer=None, preprocess='crop'):
-
+    def generate(self, x, video_save_dir, pic_path, crop_info, enhancer=None, background_enhancer=None, preprocess='crop', stream=True):
+        logger.info("Starting video generation")
         source_image=x['source_image'].type(torch.FloatTensor)
         source_semantics=x['source_semantics'].type(torch.FloatTensor)
         target_semantics=x['target_semantics_list'].type(torch.FloatTensor) 
@@ -146,18 +147,28 @@ class AnimateFromCoeff():
 
         frame_num = x['frame_num']
 
+        logger.info("Starting animation generation")
         predictions_video = make_animation(source_image, source_semantics, target_semantics,
                                         self.generator, self.kp_extractor, self.he_estimator, self.mapping, 
                                         yaw_c_seq, pitch_c_seq, roll_c_seq, use_exp = True)
 
         predictions_video = predictions_video.reshape((-1,)+predictions_video.shape[2:])
         predictions_video = predictions_video[:frame_num]
+        logger.info(f"Generated {frame_num} frames, shape: {predictions_video.shape}")
 
         video = []
+        logger.info("Starting frame processing")
+        
         for idx in range(predictions_video.shape[0]):
-            image = predictions_video[idx]
-            image = np.transpose(image.data.cpu().numpy(), [1, 2, 0]).astype(np.float32)
-            video.append(image)
+            try:
+                image = predictions_video[idx]
+                image = np.transpose(image.data.cpu().numpy(), [1, 2, 0]).astype(np.float32)
+                video.append(image)
+            except Exception as e:
+                logger.error(f"Error processing frame {idx}: {e}", exc_info=True)
+                continue
+                
+        logger.info(f"Finished processing all frames. Total frames: {len(video)}")
         result = img_as_ubyte(video)
 
         ### the generated video is 256x256, so we  keep the aspect ratio, 
@@ -196,7 +207,7 @@ class AnimateFromCoeff():
             paste_pic(path, pic_path, crop_info, new_audio_path, full_video_path)
             print(f'The generated video is named {video_save_dir}/{video_name_full}') 
         else:
-            full_video_path = av_path 
+            full_video_path = av_path
 
         #### paste back then enhancers
         if enhancer:
@@ -216,4 +227,5 @@ class AnimateFromCoeff():
         os.remove(new_audio_path)
 
         return return_path
+
 
