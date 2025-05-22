@@ -269,6 +269,36 @@ def get_wra_data_path(video_dir):
     return videos_path
 
 
+def landmark_98_to_68(lmk_98):
+    """Convert 98 landmarks to 68 landmarks"""
+    lmk_68 = np.zeros((68, 2))
+    # Jaw line
+    lmk_68[0:17] = lmk_98[0:17]
+    # Right eyebrow
+    lmk_68[17:22] = lmk_98[17:22]
+    # Left eyebrow
+    lmk_68[22:27] = lmk_98[22:27]
+    # Nose bridge
+    lmk_68[27:31] = lmk_98[27:31]
+    # Lower nose
+    lmk_68[31:36] = lmk_98[31:36]
+    # Right eye
+    lmk_68[36:42] = lmk_98[36:42]
+    # Left eye
+    lmk_68[42:48] = lmk_98[42:48]
+    # Outer lip
+    lmk_68[48:60] = lmk_98[48:60]
+    # Inner lip
+    lmk_68[60:68] = lmk_98[60:68]
+    return lmk_68
+
+def get_final_mask(mask):
+    """Get the final face mask"""
+    mask = mask.astype(np.float32)
+    mask = cv2.GaussianBlur(mask, (7, 7), 0)
+    mask = (mask > 0.5).astype(np.float32)
+    return mask
+
 if __name__ == '__main__':
     set_start_method('spawn')
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -297,3 +327,4 @@ if __name__ == '__main__':
     device_ids = cycle(device_ids)
     for data in tqdm(pool.imap_unordered(run, zip(filenames, args_list, device_ids))):
         None
+

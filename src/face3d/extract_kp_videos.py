@@ -8,17 +8,33 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 from itertools import cycle
+import torch
+from src.utils.croper import landmark_98_to_68
+from src.utils.face_parsing import init_parser, get_face_mask
+from src.utils.croper import get_final_mask
 
 from torch.multiprocessing import Pool, Process, set_start_method
 
 class KeypointExtractor():
-    def __init__(self, device):
-        self.detector = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, 
-                                                     device=device)   
+    def __init__(self, device='cuda'):
+        self.device = device
+        self.detector = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, 
+                                                    flip_input=False, 
+                                                    device=device)
+        self.parser = init_parser(device=device)
 
     def extract_keypoint(self, images, name=None, info=True):
+        """
+        Extract keypoints from images
+        Args:
+            images: PIL Image or list of PIL Images
+            name: path to save landmarks (optional)
+            info: whether to show progress bar
+        Returns:
+            landmarks: numpy array of shape (N, 68, 2)
+        """
         if isinstance(images, list):
-            keypoints = []
+            landmarks = []
             if info:
                 i_range = tqdm(images,desc='landmark Det:')
             else:
@@ -26,34 +42,109 @@ class KeypointExtractor():
 
             for image in i_range:
                 current_kp = self.extract_keypoint(image)
-                if np.mean(current_kp) == -1 and keypoints:
-                    keypoints.append(keypoints[-1])
+                if np.mean(current_kp) == -1 and landmarks:
+                    landmarks.append(landmarks[-1])
                 else:
-                    keypoints.append(current_kp[None])
+                    landmarks.append(current_kp[None])
 
-            keypoints = np.concatenate(keypoints, 0)
-            np.savetxt(os.path.splitext(name)[0]+'.txt', keypoints.reshape(-1))
-            return keypoints
+            landmarks = np.concatenate(landmarks, 0)
+            if name is not None:
+                np.save(name, landmarks)
+            return landmarks
         else:
+            # Convert PIL Image to numpy array if needed
+            if isinstance(images, Image.Image):
+                images = np.array(images)
+            
+            # Convert to RGB if image is grayscale
+            if len(images.shape) == 2:
+                images = cv2.cvtColor(images, cv2.COLOR_GRAY2RGB)
+            elif images.shape[2] == 4:  # If image has alpha channel
+                images = images[:, :, :3]
+            
             while True:
                 try:
-                    keypoints = self.detector.get_landmarks_from_image(np.array(images))[0]
-                    break
+                    with torch.no_grad():
+                        keypoints = self.detector.get_landmarks_from_image(images)[0]
+                        break
                 except RuntimeError as e:
                     if str(e).startswith('CUDA'):
-                        print("Warning: out of memory, sleep for 1s")
-                        time.sleep(1)
+                        torch.cuda.empty_cache()
                     else:
-                        print(e)
-                        break    
+                        images = cv2.resize(images, (0,0), fx=0.5, fy=0.5)
+                        print('resize to', images.shape)
                 except TypeError:
                     print('No face detected in this image')
                     shape = [68, 2]
                     keypoints = -1. * np.ones(shape)                    
                     break
+            keypoints = keypoints.astype(np.float32)
             if name is not None:
                 np.savetxt(os.path.splitext(name)[0]+'.txt', keypoints.reshape(-1))
             return keypoints
+
+    def extract_keypoint_with_parsing(self, images, name=None, info=True):
+        """
+        Extract keypoints and masks from images
+        Args:
+            images: PIL Image or list of PIL Images
+            name: path to save landmarks (optional)
+            info: whether to show progress bar
+        Returns:
+            landmarks: numpy array of shape (N, 68, 2)
+            masks: numpy array of shape (N, H, W)
+        """
+        if isinstance(images, list):
+            landmarks = []
+            masks = []
+            if info:
+                i_range = tqdm(images,desc='landmark Det:')
+            else:
+                i_range = images
+                
+            for image in i_range:
+                current_kp, current_mask = self.extract_keypoint_with_parsing(image)
+                if np.mean(current_kp) == -1 and landmarks:
+                    landmarks.append(landmarks[-1])
+                    masks.append(masks[-1])
+                else:
+                    landmarks.append(current_kp[None])
+                    masks.append(current_mask[None])
+                    
+            landmarks = np.concatenate(landmarks, 0)
+            masks = np.concatenate(masks, 0)
+            if name is not None:
+                np.save(name, landmarks)
+                np.save(name.replace('.npy', '_mask.npy'), masks)
+            return landmarks, masks
+        else:
+            # Convert PIL Image to numpy array if needed
+            if isinstance(images, Image.Image):
+                images = np.array(images)
+            
+            # Convert to RGB if image is grayscale
+            if len(images.shape) == 2:
+                images = cv2.cvtColor(images, cv2.COLOR_GRAY2RGB)
+            elif images.shape[2] == 4:  # If image has alpha channel
+                images = images[:, :, :3]
+            
+            while True:
+                try:
+                    with torch.no_grad():
+                        keypoints = self.detector.get_landmarks_from_image(images)[0]
+                        mask = get_face_mask(images, self.parser, normalize=False)
+                        mask = get_final_mask(mask)
+                        mask = cv2.resize(mask, (256, 256))
+                        break
+                except RuntimeError as e:
+                    if str(e).startswith('CUDA'):
+                        torch.cuda.empty_cache()
+                    else:
+                        images = cv2.resize(images, (0,0), fx=0.5, fy=0.5)
+                        print('resize to', images.shape)
+                        
+            keypoints = keypoints.astype(np.float32)
+            return keypoints, mask
 
 def read_video(filename):
     frames = []
@@ -106,3 +197,4 @@ if __name__ == '__main__':
     device_ids = cycle(device_ids)
     for data in tqdm(pool.imap_unordered(run, zip(filenames, args_list, device_ids))):
         None
+
