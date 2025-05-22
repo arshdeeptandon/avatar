@@ -1,5 +1,8 @@
 import os
-import torch 
+import torch
+import numpy as np
+from PIL import Image
+import torchvision.transforms as transforms
 
 from gfpgan import GFPGANer
 
@@ -9,7 +12,71 @@ from src.utils.videoio import load_video_to_cv2
 
 import cv2
 
+# List of available enhancers
+enhancer_list = ['gfpgan', 'gpen']
 
+class FaceEnhancer:
+    def __init__(self, enhancer_name, device):
+        self.device = device
+        self.enhancer_name = enhancer_name
+        self.model = self.load_enhancer()
+        
+    def load_enhancer(self):
+        """Load the specified face enhancer model"""
+        if self.enhancer_name == 'gfpgan':
+            try:
+                from gfpgan import GFPGANer
+                model = GFPGANer(
+                    model_path='https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth',
+                    upscale=1,
+                    arch='clean',
+                    channel_multiplier=2,
+                    device=self.device
+                )
+                return model
+            except ImportError:
+                print("GFPGAN not installed. Please install it with: pip install gfpgan")
+                return None
+        elif self.enhancer_name == 'gpen':
+            try:
+                from gpen import GPEN
+                model = GPEN(
+                    model_path='https://github.com/yangxy/GPEN/releases/download/v0.0.0/GPEN-BFR-512.pth',
+                    device=self.device
+                )
+                return model
+            except ImportError:
+                print("GPEN not installed. Please install it with: pip install gpen")
+                return None
+        else:
+            return None
+    
+    def enhance(self, img):
+        """Enhance a single image"""
+        if self.model is None:
+            return img
+            
+        if isinstance(img, str):
+            img = Image.open(img).convert('RGB')
+        elif isinstance(img, np.ndarray):
+            img = Image.fromarray(img)
+            
+        # Convert to numpy array
+        img = np.array(img)
+        
+        # Enhance image
+        if self.enhancer_name == 'gfpgan':
+            _, _, output = self.model.enhance(img, has_aligned=False, only_center_face=False, paste_back=True)
+        elif self.enhancer_name == 'gpen':
+            output = self.model.enhance(img)
+        else:
+            output = img
+            
+        return output
+
+def enhancer_generator_with_len(enhancer_name, device):
+    """Create a face enhancer instance"""
+    return FaceEnhancer(enhancer_name, device)
 
 def enhancer(images, method='gfpgan', bg_upsampler='realesrgan'):
     print('face enhancer....')
@@ -93,3 +160,4 @@ def enhancer(images, method='gfpgan', bg_upsampler='realesrgan'):
         restored_img += [r_img]
        
     return restored_img
+
